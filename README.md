@@ -148,6 +148,7 @@ This project uses GitHub Actions for continuous integration:
 
 - Automatically builds Linux and Windows executables on each push to the main branch
 - When a new release is created, automatically attaches the built executables to the release
+- Automatically adds built binaries to the most recent release for each push to the main branch
 - Can be manually triggered from the Actions tab in the GitHub repository
 
 ### Manually Triggering a Build and Release
@@ -159,7 +160,7 @@ This project uses GitHub Actions for continuous integration:
 5. Click "Run workflow" to start the build process
 
 When manually triggered with "Publish binaries to release" option:
-- If a release already exists, the binaries will be attached to the latest release
+- The binaries will be attached to the most recent release
 - If no release exists, a new release tagged "latest" will be created automatically
 
 ## License
