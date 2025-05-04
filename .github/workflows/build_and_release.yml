@@ -369,20 +369,3 @@ jobs:
             dirtree-windows.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Debugging job to help diagnose issues
-  debug-info:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-      
-      - name: Display event name and inputs
-        run: |
-          echo "Event name is ${{ github.event_name }}"
-          echo "Event type is ${{ github.event.type || 'not set' }}"
-          echo "Ref is ${{ github.ref }}"
-          echo "Workflow dispatch inputs: ${{ toJson(github.event.inputs) || 'null' }}"
-          echo "Publish binaries input is ${{ github.event.inputs.publish_binaries || 'not set' }}"
