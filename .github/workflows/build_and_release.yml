@@ -187,18 +187,30 @@ jobs:
             const fs = require('fs');
             
             async function uploadReleaseAsset(release_id, asset_path, asset_name, content_type) {
-              const data = fs.readFileSync(asset_path);
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release_id,
-                name: asset_name,
-                data: data,
-                headers: {
-                  'content-type': content_type,
-                  'content-length': data.length
-                }
-              });
+              try {
+                console.log(`Reading file: ${asset_path}`);
+                const data = fs.readFileSync(asset_path);
+                console.log(`Uploading ${asset_name} (${data.length} bytes) to release ${release_id}`);
+                
+                const uploadResponse = await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release_id,
+                  name: asset_name,
+                  data: data,
+                  headers: {
+                    'content-type': content_type,
+                    'content-length': data.length
+                  }
+                });
+                console.log(`Successfully uploaded ${asset_name}, asset id: ${uploadResponse.data.id}`);
+                return uploadResponse;
+              } catch (error) {
+                console.error(`Error uploading ${asset_name}: ${error.message}`);
+                core.warning(`Failed to upload ${asset_name}: ${error.message}`);
+                if (error.stack) console.error(error.stack);
+                throw error;
+              }
             }
             
             try {
@@ -206,48 +218,115 @@ jobs:
               let release_id;
               if ('${{ steps.get_release.outputs.has_release }}' === 'true') {
                 release_id = parseInt('${{ steps.get_release.outputs.release_id }}');
+                console.log(`Using existing release with ID: ${release_id}`);
               } else {
                 release_id = parseInt('${{ steps.create_release.outputs.id }}');
+                console.log(`Using newly created release with ID: ${release_id}`);
+              }
+              
+              if (!release_id) {
+                throw new Error('No valid release ID found');
               }
               
               // Delete existing assets with the same names if any
-              const assets = await github.rest.repos.listReleaseAssets({
+              console.log(`Fetching existing assets for release ${release_id}`);
+              const assetsResponse = await github.rest.repos.listReleaseAssets({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 release_id: release_id
               });
               
-              for (const asset of assets.data) {
-                if (asset.name === 'dirtree-linux.zip' || 
-                    asset.name === 'dirtree-windows.zip' || 
-                    asset.name === 'dirtree-linux' || 
-                    asset.name === 'dirtree-windows.exe') {
-                  console.log(`Deleting existing asset: ${asset.name}`);
-                  await github.rest.repos.deleteReleaseAsset({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    asset_id: asset.id
-                  });
+              const assets = assetsResponse.data;
+              console.log(`Found ${assets.length} existing assets`);
+              
+              const assetNamesToReplace = [
+                'dirtree-linux.zip', 
+                'dirtree-windows.zip', 
+                'dirtree-linux', 
+                'dirtree-windows.exe'
+              ];
+              
+              for (const asset of assets) {
+                if (assetNamesToReplace.includes(asset.name)) {
+                  console.log(`Deleting existing asset: ${asset.name} (ID: ${asset.id})`);
+                  try {
+                    await github.rest.repos.deleteReleaseAsset({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      asset_id: asset.id
+                    });
+                    console.log(`Successfully deleted ${asset.name}`);
+                  } catch (error) {
+                    console.error(`Error deleting asset ${asset.name}: ${error.message}`);
+                    // Continue with other assets even if one fails
+                  }
                 }
               }
               
-              // Upload ZIP archives
-              console.log('Uploading dirtree-linux.zip');
-              await uploadReleaseAsset(release_id, 'dirtree-linux.zip', 'dirtree-linux.zip', 'application/zip');
+              // Upload the assets one by one with better error handling
+              const filesToUpload = [
+                { path: 'dirtree-linux.zip', name: 'dirtree-linux.zip', contentType: 'application/zip' },
+                { path: 'dirtree-windows.zip', name: 'dirtree-windows.zip', contentType: 'application/zip' },
+                { path: 'dirtree-linux', name: 'dirtree-linux', contentType: 'application/octet-stream' },
+                { path: 'dirtree-windows.exe', name: 'dirtree-windows.exe', contentType: 'application/octet-stream' }
+              ];
               
-              console.log('Uploading dirtree-windows.zip');
-              await uploadReleaseAsset(release_id, 'dirtree-windows.zip', 'dirtree-windows.zip', 'application/zip');
+              for (const file of filesToUpload) {
+                console.log(`Processing file: ${file.path}`);
+                try {
+                  await uploadReleaseAsset(release_id, file.path, file.name, file.contentType);
+                } catch (error) {
+                  console.error(`Failed to upload ${file.name}: ${error.message}`);
+                  // Continue with other files even if one fails
+                }
+              }
               
-              // Upload unzipped binaries
-              console.log('Uploading unzipped Linux binary');
-              await uploadReleaseAsset(release_id, 'dirtree-linux', 'dirtree-linux', 'application/octet-stream');
+              console.log('All assets processed. Updating release description.');
               
-              console.log('Uploading unzipped Windows binary');
-              await uploadReleaseAsset(release_id, 'dirtree-windows.exe', 'dirtree-windows.exe', 'application/octet-stream');
+              // Make sure the release description is updated
+              try {
+                let body = '';
+                let releaseName = '';
+                
+                if ('${{ steps.get_release.outputs.release_tag }}' === 'latest') {
+                  releaseName = 'Latest Build';
+                  body = `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message || 'Manual workflow run' }}`;
+                } else {
+                  // For regular releases, get the current name and body
+                  const release = await github.rest.repos.getRelease({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    release_id: release_id
+                  });
+                  
+                  releaseName = release.data.name;
+                  body = release.data.body || '';
+                  if (!body.includes('Binaries updated:')) {
+                    body += `\n\n---\nBinaries updated: ${new Date().toISOString()}`;
+                  } else {
+                    // Replace the existing "Binaries updated" line
+                    body = body.replace(/Binaries updated:.*/, `Binaries updated: ${new Date().toISOString()}`);
+                  }
+                }
+                
+                console.log(`Updating release ${release_id} with new description`);
+                await github.rest.repos.updateRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release_id,
+                  name: releaseName,
+                  body: body
+                });
+                console.log('Release description updated successfully');
+              } catch (error) {
+                console.error(`Error updating release description: ${error.message}`);
+                core.warning(`Failed to update release description: ${error.message}`);
+              }
               
-              console.log('Assets uploaded successfully');
+              console.log('Release update process completed successfully');
             } catch (error) {
-              core.setFailed(`Error uploading assets: ${error.message}`);
+              core.setFailed(`Error in release process: ${error.message}`);
+              console.error(`Error stack: ${error.stack}`);
             }
   
   release-binaries:
