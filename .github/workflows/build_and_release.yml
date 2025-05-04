@@ -49,9 +49,148 @@ jobs:
           name: dirtree-windows
           path: dirtree.exe
   
+  # New job for pushing to main branch - creates/updates a rolling "latest" release
+  update-latest-release:
+    needs: build-linux
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dirtree-linux
+          path: ./
+      
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dirtree-windows
+          path: ./
+      
+      - name: Set executable permissions
+        run: chmod +x dirtree
+      
+      - name: Create ZIP archive
+        run: |
+          zip dirtree-linux.zip dirtree
+          zip dirtree-windows.zip dirtree.exe
+      
+      - name: Check for existing latest release
+        id: check_release
+        uses: actions/github-script@v6
+        with:
+          script: |
+            try {
+              const releases = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+              
+              // Look for a release with the tag 'latest'
+              const latestRelease = releases.data.find(release => release.tag_name === 'latest');
+              
+              if (latestRelease) {
+                core.setOutput('release_exists', 'true');
+                core.setOutput('release_id', latestRelease.id);
+              } else {
+                core.setOutput('release_exists', 'false');
+              }
+            } catch (error) {
+              core.setFailed(`Error checking for latest release: ${error.message}`);
+            }
+
+      - name: Create latest release if it doesn't exist
+        if: steps.check_release.outputs.release_exists != 'true'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: latest
+          release_name: Latest Build
+          body: |
+            This is an automatically updated release containing the latest build.
+            Last updated: ${{ github.event.head_commit.timestamp }}
+            Commit: ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
+
+      - name: Update existing release
+        if: steps.check_release.outputs.release_exists == 'true'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: parseInt(${{ steps.check_release.outputs.release_id }}),
+                name: 'Latest Build',
+                body: `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message }}`
+              });
+            } catch (error) {
+              core.setFailed(`Error updating release: ${error.message}`);
+            }
+
+      - name: Upload to latest release
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            async function uploadReleaseAsset(release_id, asset_path, asset_name, content_type) {
+              const data = fs.readFileSync(asset_path);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release_id,
+                name: asset_name,
+                data: data,
+                headers: {
+                  'content-type': content_type,
+                  'content-length': data.length
+                }
+              });
+            }
+            
+            try {
+              // Get the latest release ID
+              let release_id;
+              if ('${{ steps.check_release.outputs.release_exists }}' === 'true') {
+                release_id = parseInt('${{ steps.check_release.outputs.release_id }}');
+              } else {
+                // Get the ID from the newly created release
+                release_id = '${{ steps.create_release.outputs.id }}';
+              }
+              
+              // Delete existing assets if any
+              const assets = await github.rest.repos.listReleaseAssets({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release_id
+              });
+              
+              for (const asset of assets.data) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: asset.id
+                });
+              }
+              
+              // Upload new assets
+              await uploadReleaseAsset(release_id, 'dirtree-linux.zip', 'dirtree-linux.zip', 'application/zip');
+              await uploadReleaseAsset(release_id, 'dirtree-windows.zip', 'dirtree-windows.zip', 'application/zip');
+              
+              console.log('Assets uploaded successfully');
+            } catch (error) {
+              core.setFailed(`Error uploading assets: ${error.message}`);
+            }
+  
   release-binaries:
     needs: build-linux
-    # Fixed condition to correctly access the input variable
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
     steps:
@@ -170,5 +309,6 @@ jobs:
         run: |
           echo "Event name is ${{ github.event_name }}"
           echo "Event type is ${{ github.event.type || 'not set' }}"
-          echo "Workflow dispatch inputs: ${{ toJson(github.event.inputs) }}"
+          echo "Ref is ${{ github.ref }}"
+          echo "Workflow dispatch inputs: ${{ toJson(github.event.inputs) || 'null' }}"
           echo "Publish binaries input is ${{ github.event.inputs.publish_binaries || 'not set' }}"
