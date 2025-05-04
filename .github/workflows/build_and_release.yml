@@ -1,0 +1,81 @@
+name: Build and Release
+
+on:
+  release:
+    types: [created]
+  push:
+    branches: [main]
+    paths:
+      - 'dirtree.c'
+      - 'Makefile'
+      - '.github/workflows/build_and_release.yml'
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.MD'
+      - 'docs/**'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make mingw-w64
+      
+      - name: Build Linux executable
+        run: |
+          make clean
+          make
+      
+      - name: Build Windows executable
+        run: |
+          x86_64-w64-mingw32-gcc -o dirtree.exe dirtree.c -static
+      
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dirtree-linux
+          path: dirtree
+      
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dirtree-windows
+          path: dirtree.exe
+  
+  release-binaries:
+    needs: build-linux
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dirtree-linux
+          path: ./
+      
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dirtree-windows
+          path: ./
+      
+      - name: Set executable permissions
+        run: chmod +x dirtree
+      
+      - name: Create ZIP archive
+        run: |
+          zip dirtree-linux.zip dirtree
+          zip dirtree-windows.zip dirtree.exe
+      
+      - name: Upload to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dirtree-linux.zip
+            dirtree-windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

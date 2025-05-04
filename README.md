@@ -60,16 +60,25 @@ By default, dirtree skips certain common directories and files that are typicall
 
 Use the `-a` flag to display all directories and files without skipping.
 
-## Building from Source
+## Installation
 
-### Prerequisites
+### Downloading Pre-built Binaries
 
-#### For Linux/macOS
+You can download the latest pre-built binaries from the [GitHub Releases](https://github.com/a2hop/dirtree/releases) page:
+
+- **Linux**: Download the `dirtree-linux.zip` file, extract it, and make it executable with `chmod +x dirtree`
+- **Windows**: Download the `dirtree-windows.zip` file and extract the `dirtree.exe` executable
+
+### Building from Source
+
+#### Prerequisites
+
+##### For Linux/macOS
 
 - GCC or compatible C compiler
 - Make
 
-#### For Cross-compiling to Windows from Linux
+##### For Cross-compiling to Windows from Linux
 
 - MinGW-w64 toolchain
 - Install on Debian/Ubuntu with:
@@ -77,32 +86,39 @@ Use the `-a` flag to display all directories and files without skipping.
   sudo apt-get install mingw-w64
   ```
 
-### Build Instructions
+#### Build Instructions
 
-#### For Linux/macOS
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/dirtree.git
-cd dirtree
-
-# Build the executable
-make
-
-# Run the program
-./dirtree
-```
-
-#### Cross-compile for Windows from Linux
+##### Building the Executable
 
 ```bash
-# Build for Windows
+# Make the build script executable
+chmod +x build.sh
+
+# Run the build script
 ./build.sh
-
-# This creates dirtree.exe which can be used on Windows
 ```
 
-### Manual Compilation
+This creates:
+- `dirtree` (Linux/macOS executable)
+- `dirtree.exe` (Windows executable)
+
+##### Building the Shared Library
+
+```bash
+# Make the library build script executable
+chmod +x build_lib.sh
+
+# Run the library build script
+./build_lib.sh
+```
+
+This creates:
+- `libdirtree.so` (Linux/macOS shared library)
+- `libdirtree.dll` (Windows shared library)
+
+#### Manual Compilation
+
+##### Executable
 
 Linux/macOS:
 ```bash
@@ -114,6 +130,25 @@ Windows (using MinGW):
 x86_64-w64-mingw32-gcc -o dirtree.exe dirtree.c -static
 ```
 
+##### Shared Library
+
+Linux/macOS:
+```bash
+gcc -Wall -Wextra -O2 -shared -fPIC -o libdirtree.so dirtree.c
+```
+
+Windows (using MinGW):
+```bash
+x86_64-w64-mingw32-gcc -shared -o libdirtree.dll dirtree.c
+```
+
+## Continuous Integration
+
+This project uses GitHub Actions for continuous integration:
+
+- Automatically builds Linux and Windows executables on each push to the main branch
+- When a new release is created, automatically attaches the built executables to the release
+
 ## License
 
-This project is open source and available under the MIT License.
+This project is open source and available under the BSD 3-Clause License.
