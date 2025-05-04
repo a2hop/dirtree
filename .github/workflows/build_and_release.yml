@@ -252,7 +252,7 @@ jobs:
   
   release-binaries:
     needs: build-linux
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
+    if: github.event_name == 'push' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: write
