@@ -2,13 +2,20 @@ name: Build and Release
 
 on:
   release:
-    types: [created]
+    types: [created, published]
   push:
     branches: [main]
     paths:
       - 'dirtree.c'
       - 'Makefile'
       - '.github/workflows/build_and_release.yml'
+  workflow_dispatch:
+    inputs:
+      publish_binaries:
+        description: 'Publish binaries to release'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-linux:
@@ -44,7 +51,7 @@ jobs:
   
   release-binaries:
     needs: build-linux
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Download Linux artifact
@@ -67,7 +74,36 @@ jobs:
           zip dirtree-linux.zip dirtree
           zip dirtree-windows.zip dirtree.exe
       
-      - name: Upload to release
+      - name: Get latest release
+        if: github.event_name == 'workflow_dispatch'
+        id: latest_release
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            if (releases.data.length === 0) {
+              core.setFailed('No releases found');
+              return null;
+            }
+            return releases.data[0].id;
+          result-encoding: string
+
+      - name: Upload to existing release
+        if: github.event_name == 'workflow_dispatch' && steps.latest_release.outputs.result != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dirtree-linux.zip
+            dirtree-windows.zip
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload to new release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: |
@@ -75,3 +111,15 @@ jobs:
             dirtree-windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Add debug job to help diagnose issues
+  debug-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "$GITHUB_CONTEXT"
+      
+      - name: Display event name
+        run: echo "Event name is ${{ github.event_name }}"
