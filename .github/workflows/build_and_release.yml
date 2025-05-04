@@ -92,6 +92,29 @@ jobs:
         with:
           script: |
             try {
+              // First, explicitly check if a 'latest' tag release exists
+              console.log('Looking for a release with tag "latest"');
+              try {
+                const latestTagRelease = await github.rest.repos.getReleaseByTag({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag: 'latest'
+                });
+                
+                if (latestTagRelease && latestTagRelease.data) {
+                  console.log(`Found release with tag "latest", ID: ${latestTagRelease.data.id}`);
+                  core.setOutput('has_release', 'true');
+                  core.setOutput('release_id', latestTagRelease.data.id);
+                  core.setOutput('release_tag', latestTagRelease.data.tag_name);
+                  core.setOutput('release_name', latestTagRelease.data.name);
+                  return latestTagRelease.data.id;
+                }
+              } catch (tagError) {
+                console.log(`No release with tag "latest" found: ${tagError.message}`);
+                // Continue to check for most recent release if no 'latest' tag exists
+              }
+              
+              // Fallback: get the most recent release
               const releases = await github.rest.repos.listReleases({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -99,6 +122,7 @@ jobs:
               });
               
               if (releases.data.length === 0) {
+                console.log('No releases found, will create a new one');
                 core.setOutput('has_release', 'false');
                 return null;
               }
@@ -110,11 +134,13 @@ jobs:
               core.setOutput('release_tag', latestRelease.tag_name);
               core.setOutput('release_name', latestRelease.name);
               
-              console.log(`Found release: ${latestRelease.name} (${latestRelease.tag_name})`);
+              console.log(`Found most recent release: ${latestRelease.name} (${latestRelease.tag_name}), ID: ${latestRelease.id}`);
               
               return latestRelease.id;
             } catch (error) {
+              console.error(`Error checking for latest release: ${error.message}`);
               core.setFailed(`Error checking for latest release: ${error.message}`);
+              return null;
             }
 
       # Create a new release if none exists
@@ -216,17 +242,24 @@ jobs:
             try {
               // Get the release ID
               let release_id;
+              let isLatestTag = false;
+              
               if ('${{ steps.get_release.outputs.has_release }}' === 'true') {
                 release_id = parseInt('${{ steps.get_release.outputs.release_id }}');
-                console.log(`Using existing release with ID: ${release_id}`);
+                isLatestTag = '${{ steps.get_release.outputs.release_tag }}' === 'latest';
+                console.log(`Using existing release with ID: ${release_id}, is latest tag: ${isLatestTag}`);
               } else {
                 release_id = parseInt('${{ steps.create_release.outputs.id }}');
+                isLatestTag = true; // New releases are created with 'latest' tag
                 console.log(`Using newly created release with ID: ${release_id}`);
               }
               
               if (!release_id) {
                 throw new Error('No valid release ID found');
               }
+              
+              // For 'latest' tag releases, always update the assets and description
+              // For other releases, only update if they don't have these assets already
               
               // Delete existing assets with the same names if any
               console.log(`Fetching existing assets for release ${release_id}`);
@@ -246,6 +279,7 @@ jobs:
                 'dirtree-windows.exe'
               ];
               
+              // Always delete assets for latest tag or if forced
               for (const asset of assets) {
                 if (assetNamesToReplace.includes(asset.name)) {
                   console.log(`Deleting existing asset: ${asset.name} (ID: ${asset.id})`);
@@ -288,7 +322,7 @@ jobs:
                 let body = '';
                 let releaseName = '';
                 
-                if ('${{ steps.get_release.outputs.release_tag }}' === 'latest') {
+                if (isLatestTag) {
                   releaseName = 'Latest Build';
                   body = `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message || 'Manual workflow run' }}`;
                 } else {
@@ -309,7 +343,7 @@ jobs:
                   }
                 }
                 
-                console.log(`Updating release ${release_id} with new description`);
+                console.log(`Updating release ${release_id} with new description and name: ${releaseName}`);
                 await github.rest.repos.updateRelease({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -331,7 +365,9 @@ jobs:
   
   release-binaries:
     needs: build-linux
-    if: github.event_name == 'push' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
+    # Only run this job for actual release events or workflow_dispatch, 
+    # not for regular pushes which are handled by update-latest-release
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: write
