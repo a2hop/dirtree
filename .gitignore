@@ -1,0 +1,21 @@
+# Binary files
+dirtree
+*.o
+*.a
+*.so
+*.exe
+*.dll
+
+# Build directory
+build/
+bin/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Dependencies
+vendor/
