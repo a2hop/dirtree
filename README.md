@@ -157,18 +157,6 @@ This project uses GitHub Actions for continuous integration:
 - Automatically adds built binaries to the most recent release for each push to the main branch
 - Can be manually triggered from the Actions tab in the GitHub repository
 
-### Manually Triggering a Build and Release
-
-1. Go to the Actions tab in the GitHub repository
-2. Select the "Build and Release" workflow
-3. Click "Run workflow"
-4. Ensure "Publish binaries to release" is checked (default is true)
-5. Click "Run workflow" to start the build process
-
-When manually triggered with "Publish binaries to release" option:
-- The binaries will be attached to the most recent release
-- If no release exists, a new release tagged "latest" will be created automatically
-
 ## License
 
 This project is open source and available under the BSD 3-Clause License.
