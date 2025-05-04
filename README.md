@@ -66,8 +66,14 @@ Use the `-a` flag to display all directories and files without skipping.
 
 You can download the latest pre-built binaries from the [GitHub Releases](https://github.com/a2hop/dirtree/releases) page:
 
+#### Packaged Files
 - **Linux**: Download the `dirtree-linux.zip` file, extract it, and make it executable with `chmod +x dirtree`
 - **Windows**: Download the `dirtree-windows.zip` file and extract the `dirtree.exe` executable
+
+#### Direct Executables
+For convenience, unzipped binaries are also available:
+- **Linux**: Download `dirtree-linux` directly and make it executable with `chmod +x dirtree-linux`
+- **Windows**: Download `dirtree-windows.exe` directly and run it
 
 ### Building from Source
 

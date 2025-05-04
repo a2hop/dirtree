@@ -74,7 +74,12 @@ jobs:
           path: ./
       
       - name: Set executable permissions
-        run: chmod +x dirtree
+        run: |
+          chmod +x dirtree
+          # Create copies with clear platform naming for unzipped binaries
+          cp dirtree dirtree-linux
+          cp dirtree.exe dirtree-windows.exe
+          chmod +x dirtree-linux
       
       - name: Create ZIP archive
         run: |
@@ -213,7 +218,10 @@ jobs:
               });
               
               for (const asset of assets.data) {
-                if (asset.name === 'dirtree-linux.zip' || asset.name === 'dirtree-windows.zip') {
+                if (asset.name === 'dirtree-linux.zip' || 
+                    asset.name === 'dirtree-windows.zip' || 
+                    asset.name === 'dirtree-linux' || 
+                    asset.name === 'dirtree-windows.exe') {
                   console.log(`Deleting existing asset: ${asset.name}`);
                   await github.rest.repos.deleteReleaseAsset({
                     owner: context.repo.owner,
@@ -223,12 +231,19 @@ jobs:
                 }
               }
               
-              // Upload new assets
+              // Upload ZIP archives
               console.log('Uploading dirtree-linux.zip');
               await uploadReleaseAsset(release_id, 'dirtree-linux.zip', 'dirtree-linux.zip', 'application/zip');
               
               console.log('Uploading dirtree-windows.zip');
               await uploadReleaseAsset(release_id, 'dirtree-windows.zip', 'dirtree-windows.zip', 'application/zip');
+              
+              // Upload unzipped binaries
+              console.log('Uploading unzipped Linux binary');
+              await uploadReleaseAsset(release_id, 'dirtree-linux', 'dirtree-linux', 'application/octet-stream');
+              
+              console.log('Uploading unzipped Windows binary');
+              await uploadReleaseAsset(release_id, 'dirtree-windows.exe', 'dirtree-windows.exe', 'application/octet-stream');
               
               console.log('Assets uploaded successfully');
             } catch (error) {
@@ -239,7 +254,6 @@ jobs:
     needs: build-linux
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
-    # Ensure this job has the permissions it needs
     permissions:
       contents: write
     steps:
@@ -256,7 +270,12 @@ jobs:
           path: ./
       
       - name: Set executable permissions
-        run: chmod +x dirtree
+        run: |
+          chmod +x dirtree
+          # Create copies with clear platform naming for unzipped binaries
+          cp dirtree dirtree-linux
+          cp dirtree.exe dirtree-windows.exe
+          chmod +x dirtree-linux
       
       - name: Create ZIP archive
         run: |
@@ -320,6 +339,8 @@ jobs:
           files: |
             dirtree-linux.zip
             dirtree-windows.zip
+            dirtree-linux
+            dirtree-windows.exe
           tag_name: ${{ steps.latest_release.outputs.latest_tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -331,6 +352,8 @@ jobs:
           files: |
             dirtree-linux.zip
             dirtree-windows.zip
+            dirtree-linux
+            dirtree-windows.exe
           tag_name: ${{ steps.create_release.outputs.result || 'latest' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -342,6 +365,8 @@ jobs:
           files: |
             dirtree-linux.zip
             dirtree-windows.zip
+            dirtree-linux
+            dirtree-windows.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
