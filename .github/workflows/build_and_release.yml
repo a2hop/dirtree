@@ -9,10 +9,6 @@ on:
       - 'dirtree.c'
       - 'Makefile'
       - '.github/workflows/build_and_release.yml'
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.MD'
-      - 'docs/**'
 
 jobs:
   build-linux:
