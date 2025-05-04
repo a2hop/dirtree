@@ -5,6 +5,7 @@ dirtree
 *.so
 *.exe
 *.dll
+libdirtree.*
 
 # Build directory
 build/
