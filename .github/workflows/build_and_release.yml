@@ -17,12 +17,11 @@ on:
         default: true
         type: boolean
 
-# Add explicit permissions
 permissions:
   contents: write
 
 jobs:
-  build-linux:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,455 +31,206 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc make mingw-w64
       
-      - name: Build Linux executable
+      - name: Build executables
         run: |
           make clean
           make
-      
-      - name: Build Windows executable
-        run: |
           x86_64-w64-mingw32-gcc -o dirtree.exe dirtree.c -static
       
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dirtree-linux
-          path: dirtree
-      
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dirtree-windows
-          path: dirtree.exe
-  
-  # Updated job to handle adding binaries to the most recent release
-  update-latest-release:
-    needs: build-linux
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dirtree-linux
-          path: ./
-      
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dirtree-windows
-          path: ./
-      
-      - name: Set executable permissions and create platform-specific copies
+      - name: Prepare artifacts
         run: |
           chmod +x dirtree
-          # Create copies with clear platform naming for unzipped binaries
           cp dirtree dirtree-linux
           cp dirtree.exe dirtree-windows.exe
-          chmod +x dirtree-linux
-      
-      - name: Create ZIP archive
-        run: |
           zip dirtree-linux.zip dirtree
           zip dirtree-windows.zip dirtree.exe
       
-      - name: Get most recent release
-        id: get_release
-        uses: actions/github-script@v6
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            try {
-              // First, explicitly check if a 'latest' tag release exists
-              console.log('Looking for a release with tag "latest"');
-              try {
-                const latestTagRelease = await github.rest.repos.getReleaseByTag({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  tag: 'latest'
-                });
-                
-                if (latestTagRelease && latestTagRelease.data) {
-                  console.log(`Found release with tag "latest", ID: ${latestTagRelease.data.id}`);
-                  core.setOutput('has_release', 'true');
-                  core.setOutput('release_id', latestTagRelease.data.id);
-                  core.setOutput('release_tag', latestTagRelease.data.tag_name);
-                  core.setOutput('release_name', latestTagRelease.data.name);
-                  return latestTagRelease.data.id;
-                }
-              } catch (tagError) {
-                console.log(`No release with tag "latest" found: ${tagError.message}`);
-                // Continue to check for most recent release if no 'latest' tag exists
-              }
-              
-              // Fallback: get the most recent release
-              const releases = await github.rest.repos.listReleases({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: 1
-              });
-              
-              if (releases.data.length === 0) {
-                console.log('No releases found, will create a new one');
-                core.setOutput('has_release', 'false');
-                return null;
-              }
-              
-              // Use the most recent release (first in the list)
-              const latestRelease = releases.data[0];
-              core.setOutput('has_release', 'true');
-              core.setOutput('release_id', latestRelease.id);
-              core.setOutput('release_tag', latestRelease.tag_name);
-              core.setOutput('release_name', latestRelease.name);
-              
-              console.log(`Found most recent release: ${latestRelease.name} (${latestRelease.tag_name}), ID: ${latestRelease.id}`);
-              
-              return latestRelease.id;
-            } catch (error) {
-              console.error(`Error checking for latest release: ${error.message}`);
-              core.setFailed(`Error checking for latest release: ${error.message}`);
-              return null;
-            }
-
-      # Create a new release if none exists
-      - name: Create latest release if none exists
-        if: steps.get_release.outputs.has_release != 'true'
-        id: create_release
-        uses: actions/github-script@v6
+          name: binaries
+          path: |
+            dirtree-linux
+            dirtree-windows.exe
+            dirtree-linux.zip
+            dirtree-windows.zip
+  
+  update-releases:
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              const response = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: 'latest',
-                name: 'Latest Build',
-                body: `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message }}`,
-                draft: false,
-                prerelease: false
-              });
-              
-              core.setOutput('id', response.data.id);
-              core.setOutput('tag_name', response.data.tag_name);
-              return response.data.id;
-            } catch (error) {
-              core.setFailed(`Error creating release: ${error.message}`);
-              return null;
-            }
-
-      # Update existing release description
-      - name: Update existing release
-        if: steps.get_release.outputs.has_release == 'true'
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              // Only append to the body if this is the "latest" tag
-              // Otherwise, keep the original release notes
-              let body = '';
-              if ('${{ steps.get_release.outputs.release_tag }}' === 'latest') {
-                body = `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message }}`;
-              } else {
-                // For regular releases, just append a note about updated binaries
-                const release = await github.rest.repos.getRelease({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: parseInt('${{ steps.get_release.outputs.release_id }}')
-                });
-                
-                body = release.data.body + `\n\n---\nBinaries updated: ${new Date().toISOString()}`;
-              }
-              
-              await github.rest.repos.updateRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: parseInt('${{ steps.get_release.outputs.release_id }}'),
-                body: body
-              });
-            } catch (error) {
-              core.setFailed(`Error updating release: ${error.message}`);
-            }
-
-      # Upload binaries to the release (replace existing ones)
-      - name: Upload binaries to release
+          name: binaries
+          path: ./
+      
+      - name: Set executable permissions
+        run: chmod +x dirtree-linux
+      
+      - name: Update releases
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             
-            async function uploadReleaseAsset(release_id, asset_path, asset_name, content_type) {
+            async function uploadAsset(releaseId, filePath, fileName, contentType) {
               try {
-                console.log(`Reading file: ${asset_path}`);
-                const data = fs.readFileSync(asset_path);
-                console.log(`Uploading ${asset_name} (${data.length} bytes) to release ${release_id}`);
+                console.log(`Reading file: ${filePath}`);
+                const data = fs.readFileSync(filePath);
                 
-                const uploadResponse = await github.rest.repos.uploadReleaseAsset({
+                console.log(`Uploading ${fileName} (${data.length} bytes) to release ${releaseId}`);
+                const response = await github.rest.repos.uploadReleaseAsset({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  release_id: release_id,
-                  name: asset_name,
+                  release_id: releaseId,
+                  name: fileName,
                   data: data,
                   headers: {
-                    'content-type': content_type,
+                    'content-type': contentType,
                     'content-length': data.length
                   }
                 });
-                console.log(`Successfully uploaded ${asset_name}, asset id: ${uploadResponse.data.id}`);
-                return uploadResponse;
+                
+                console.log(`Successfully uploaded ${fileName}`);
+                return response;
               } catch (error) {
-                console.error(`Error uploading ${asset_name}: ${error.message}`);
-                core.warning(`Failed to upload ${asset_name}: ${error.message}`);
-                if (error.stack) console.error(error.stack);
+                console.error(`Error uploading ${fileName}: ${error.message}`);
                 throw error;
               }
             }
             
-            try {
-              // Get the release ID
-              let release_id;
-              let isLatestTag = false;
+            async function updateRelease(releaseId, isLatestTag) {
+              if (!releaseId) return;
               
-              if ('${{ steps.get_release.outputs.has_release }}' === 'true') {
-                release_id = parseInt('${{ steps.get_release.outputs.release_id }}');
-                isLatestTag = '${{ steps.get_release.outputs.release_tag }}' === 'latest';
-                console.log(`Using existing release with ID: ${release_id}, is latest tag: ${isLatestTag}`);
-              } else {
-                release_id = parseInt('${{ steps.create_release.outputs.id }}');
-                isLatestTag = true; // New releases are created with 'latest' tag
-                console.log(`Using newly created release with ID: ${release_id}`);
-              }
+              console.log(`Processing release ID: ${releaseId}, isLatestTag: ${isLatestTag}`);
               
-              if (!release_id) {
-                throw new Error('No valid release ID found');
-              }
-              
-              // For 'latest' tag releases, always update the assets and description
-              // For other releases, only update if they don't have these assets already
-              
-              // Delete existing assets with the same names if any
-              console.log(`Fetching existing assets for release ${release_id}`);
-              const assetsResponse = await github.rest.repos.listReleaseAssets({
+              const releaseInfo = await github.rest.repos.getRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                release_id: release_id
+                release_id: releaseId
               });
               
-              const assets = assetsResponse.data;
-              console.log(`Found ${assets.length} existing assets`);
+              const assets = await github.rest.repos.listReleaseAssets({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId
+              });
               
-              const assetNamesToReplace = [
-                'dirtree-linux.zip', 
-                'dirtree-windows.zip', 
-                'dirtree-linux', 
-                'dirtree-windows.exe'
-              ];
+              const assetNames = ['dirtree-linux.zip', 'dirtree-windows.zip', 'dirtree-linux', 'dirtree-windows.exe'];
               
-              // Always delete assets for latest tag or if forced
-              for (const asset of assets) {
-                if (assetNamesToReplace.includes(asset.name)) {
+              for (const asset of assets.data) {
+                if (assetNames.includes(asset.name)) {
                   console.log(`Deleting existing asset: ${asset.name} (ID: ${asset.id})`);
-                  try {
-                    await github.rest.repos.deleteReleaseAsset({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      asset_id: asset.id
-                    });
-                    console.log(`Successfully deleted ${asset.name}`);
-                  } catch (error) {
-                    console.error(`Error deleting asset ${asset.name}: ${error.message}`);
-                    // Continue with other assets even if one fails
-                  }
+                  await github.rest.repos.deleteReleaseAsset({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    asset_id: asset.id
+                  });
                 }
               }
               
-              // Upload the assets one by one with better error handling
-              const filesToUpload = [
+              const files = [
                 { path: 'dirtree-linux.zip', name: 'dirtree-linux.zip', contentType: 'application/zip' },
                 { path: 'dirtree-windows.zip', name: 'dirtree-windows.zip', contentType: 'application/zip' },
                 { path: 'dirtree-linux', name: 'dirtree-linux', contentType: 'application/octet-stream' },
                 { path: 'dirtree-windows.exe', name: 'dirtree-windows.exe', contentType: 'application/octet-stream' }
               ];
               
-              for (const file of filesToUpload) {
-                console.log(`Processing file: ${file.path}`);
-                try {
-                  await uploadReleaseAsset(release_id, file.path, file.name, file.contentType);
-                } catch (error) {
-                  console.error(`Failed to upload ${file.name}: ${error.message}`);
-                  // Continue with other files even if one fails
+              for (const file of files) {
+                await uploadAsset(releaseId, file.path, file.name, file.contentType);
+              }
+              
+              let body, name;
+              
+              if (isLatestTag) {
+                name = 'Latest Build';
+                body = `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message || 'Manual workflow run' }}`;
+              } else {
+                name = releaseInfo.data.name;
+                body = releaseInfo.data.body || '';
+                
+                if (!body.includes('Binaries updated:')) {
+                  body += `\n\n---\nBinaries updated: ${new Date().toISOString()}`;
+                } else {
+                  body = body.replace(/Binaries updated:.*/, `Binaries updated: ${new Date().toISOString()}`);
                 }
               }
               
-              console.log('All assets processed. Updating release description.');
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name: name,
+                body: body
+              });
               
-              // Make sure the release description is updated
-              try {
-                let body = '';
-                let releaseName = '';
+              console.log(`Successfully updated release: ${name}`);
+            }
+            
+            try {
+              if ('${{ github.event_name }}' === 'release') {
+                const releaseId = ${{ github.event.release.id || 'null' }};
+                if (releaseId) {
+                  await updateRelease(releaseId, false);
+                  console.log('Updated release assets for the current release');
+                }
+              } else {
+                let latestTagReleaseId = null;
+                let mostRecentReleaseId = null;
                 
-                if (isLatestTag) {
-                  releaseName = 'Latest Build';
-                  body = `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message || 'Manual workflow run' }}`;
-                } else {
-                  // For regular releases, get the current name and body
-                  const release = await github.rest.repos.getRelease({
+                try {
+                  const latestTagRelease = await github.rest.repos.getReleaseByTag({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    release_id: release_id
+                    tag: 'latest'
                   });
                   
-                  releaseName = release.data.name;
-                  body = release.data.body || '';
-                  if (!body.includes('Binaries updated:')) {
-                    body += `\n\n---\nBinaries updated: ${new Date().toISOString()}`;
-                  } else {
-                    // Replace the existing "Binaries updated" line
-                    body = body.replace(/Binaries updated:.*/, `Binaries updated: ${new Date().toISOString()}`);
+                  latestTagReleaseId = latestTagRelease.data.id;
+                  console.log(`Found existing "latest" tag release: ${latestTagReleaseId}`);
+                } catch (error) {
+                  console.log('No "latest" tag release found, will create one');
+                  
+                  const newRelease = await github.rest.repos.createRelease({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    tag_name: 'latest',
+                    name: 'Latest Build',
+                    body: `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message || 'Manual workflow run' }}`,
+                    draft: false,
+                    prerelease: false
+                  });
+                  
+                  latestTagReleaseId = newRelease.data.id;
+                  console.log(`Created new "latest" tag release: ${latestTagReleaseId}`);
+                }
+                
+                const releases = await github.rest.repos.listReleases({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: 10
+                });
+                
+                for (const release of releases.data) {
+                  if (release.tag_name !== 'latest' && release.id !== latestTagReleaseId) {
+                    mostRecentReleaseId = release.id;
+                    console.log(`Found most recent regular release: ${release.name} (${release.tag_name}), ID: ${mostRecentReleaseId}`);
+                    break;
                   }
                 }
                 
-                console.log(`Updating release ${release_id} with new description and name: ${releaseName}`);
-                await github.rest.repos.updateRelease({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release_id,
-                  name: releaseName,
-                  body: body
-                });
-                console.log('Release description updated successfully');
-              } catch (error) {
-                console.error(`Error updating release description: ${error.message}`);
-                core.warning(`Failed to update release description: ${error.message}`);
+                await updateRelease(latestTagReleaseId, true);
+                
+                if (mostRecentReleaseId && mostRecentReleaseId !== latestTagReleaseId) {
+                  await updateRelease(mostRecentReleaseId, false);
+                }
               }
               
-              console.log('Release update process completed successfully');
-            } catch (error) {
-              core.setFailed(`Error in release process: ${error.message}`);
-              console.error(`Error stack: ${error.stack}`);
-            }
-  
-  release-binaries:
-    needs: build-linux
-    # Only run this job for actual release events or workflow_dispatch, 
-    # not for regular pushes which are handled by update-latest-release
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dirtree-linux
-          path: ./
-      
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dirtree-windows
-          path: ./
-      
-      - name: Set executable permissions and create platform-specific copies
-        run: |
-          chmod +x dirtree
-          # Create copies with clear platform naming for unzipped binaries
-          cp dirtree dirtree-linux
-          cp dirtree.exe dirtree-windows.exe
-          chmod +x dirtree-linux
-      
-      - name: Create ZIP archive
-        run: |
-          zip dirtree-linux.zip dirtree
-          zip dirtree-windows.zip dirtree.exe
-      
-      - name: Get latest release
-        if: github.event_name == 'workflow_dispatch'
-        id: latest_release
-        uses: actions/github-script@v6
-        with:
-          script: |
-            try {
-              const releases = await github.rest.repos.listReleases({
-                owner: context.repo.owner,
-                repo: context.repo.repo
-              });
+              console.log('All release updates completed successfully');
               
-              if (releases.data.length === 0) {
-                core.setOutput('has_release', 'false');
-                return null;
-              }
-              
-              core.setOutput('has_release', 'true');
-              core.setOutput('latest_tag', releases.data[0].tag_name);
-              return releases.data[0].id;
             } catch (error) {
-              core.setFailed(`Error getting releases: ${error.message}`);
-              return null;
+              core.setFailed(`Error updating releases: ${error.message}`);
+              console.error(error);
             }
-          result-encoding: string
-
-      - name: Create Release if None Exists
-        if: github.event_name == 'workflow_dispatch' && steps.latest_release.outputs.has_release != 'true'
-        id: create_release
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              const response = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: 'latest',
-                name: 'Latest Build',
-                body: 'Automatically created release for latest build',
-                draft: false,
-                prerelease: false
-              });
-              
-              return response.data.tag_name;
-            } catch (error) {
-              core.setFailed(`Error creating release: ${error.message}`);
-              return null;
-            }
-
-      - name: Upload to existing release
-        if: github.event_name == 'workflow_dispatch' && steps.latest_release.outputs.has_release == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            dirtree-linux.zip
-            dirtree-windows.zip
-            dirtree-linux
-            dirtree-windows.exe
-          tag_name: ${{ steps.latest_release.outputs.latest_tag }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Upload to new release
-        if: github.event_name == 'workflow_dispatch' && steps.latest_release.outputs.has_release != 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            dirtree-linux.zip
-            dirtree-windows.zip
-            dirtree-linux
-            dirtree-windows.exe
-          tag_name: ${{ steps.create_release.outputs.result || 'latest' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Upload to current release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            dirtree-linux.zip
-            dirtree-windows.zip
-            dirtree-linux
-            dirtree-windows.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
