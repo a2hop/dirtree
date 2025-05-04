@@ -73,7 +73,7 @@ jobs:
           name: dirtree-windows
           path: ./
       
-      - name: Set executable permissions
+      - name: Set executable permissions and create platform-specific copies
         run: |
           chmod +x dirtree
           # Create copies with clear platform naming for unzipped binaries
@@ -269,7 +269,7 @@ jobs:
           name: dirtree-windows
           path: ./
       
-      - name: Set executable permissions
+      - name: Set executable permissions and create platform-specific copies
         run: |
           chmod +x dirtree
           # Create copies with clear platform naming for unzipped binaries
