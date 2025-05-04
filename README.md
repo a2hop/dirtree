@@ -155,8 +155,12 @@ This project uses GitHub Actions for continuous integration:
 1. Go to the Actions tab in the GitHub repository
 2. Select the "Build and Release" workflow
 3. Click "Run workflow"
-4. Choose whether to publish binaries to the latest release
+4. Ensure "Publish binaries to release" is checked (default is true)
 5. Click "Run workflow" to start the build process
+
+When manually triggered with "Publish binaries to release" option:
+- If a release already exists, the binaries will be attached to the latest release
+- If no release exists, a new release tagged "latest" will be created automatically
 
 ## License
 

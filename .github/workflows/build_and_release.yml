@@ -14,7 +14,7 @@ on:
       publish_binaries:
         description: 'Publish binaries to release'
         required: true
-        default: 'true'
+        default: true
         type: boolean
 
 jobs:
@@ -51,7 +51,8 @@ jobs:
   
   release-binaries:
     needs: build-linux
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_binaries == true)
+    # Fixed condition to correctly access the input variable
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Download Linux artifact
@@ -168,4 +169,6 @@ jobs:
       - name: Display event name and inputs
         run: |
           echo "Event name is ${{ github.event_name }}"
-          echo "Publish binaries input is ${{ inputs.publish_binaries }}"
+          echo "Event type is ${{ github.event.type || 'not set' }}"
+          echo "Workflow dispatch inputs: ${{ toJson(github.event.inputs) }}"
+          echo "Publish binaries input is ${{ github.event.inputs.publish_binaries || 'not set' }}"
