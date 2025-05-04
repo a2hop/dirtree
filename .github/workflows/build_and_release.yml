@@ -17,6 +17,10 @@ on:
         default: true
         type: boolean
 
+# Add explicit permissions
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -54,6 +58,9 @@ jobs:
     needs: build-linux
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # Ensure this job has the permissions it needs
+    permissions:
+      contents: write
     steps:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
@@ -99,21 +106,32 @@ jobs:
               core.setFailed(`Error checking for latest release: ${error.message}`);
             }
 
+      # Use the newer github-script approach instead of actions/create-release
       - name: Create latest release if it doesn't exist
         if: steps.check_release.outputs.release_exists != 'true'
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/github-script@v6
         with:
-          tag_name: latest
-          release_name: Latest Build
-          body: |
-            This is an automatically updated release containing the latest build.
-            Last updated: ${{ github.event.head_commit.timestamp }}
-            Commit: ${{ github.event.head_commit.message }}
-          draft: false
-          prerelease: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const response = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: 'latest',
+                name: 'Latest Build',
+                body: `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message }}`,
+                draft: false,
+                prerelease: false
+              });
+              
+              core.setOutput('id', response.data.id);
+              core.setOutput('tag_name', response.data.tag_name);
+              return response.data.id;
+            } catch (error) {
+              core.setFailed(`Error creating release: ${error.message}`);
+              return null;
+            }
 
       - name: Update existing release
         if: steps.check_release.outputs.release_exists == 'true'
@@ -125,7 +143,7 @@ jobs:
               await github.rest.repos.updateRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                release_id: parseInt(${{ steps.check_release.outputs.release_id }}),
+                release_id: parseInt('${{ steps.check_release.outputs.release_id }}'),
                 name: 'Latest Build',
                 body: `This is an automatically updated release containing the latest build.\nLast updated: ${new Date().toISOString()}\nCommit: ${{ github.event.head_commit.message }}`
               });
@@ -162,7 +180,7 @@ jobs:
                 release_id = parseInt('${{ steps.check_release.outputs.release_id }}');
               } else {
                 // Get the ID from the newly created release
-                release_id = '${{ steps.create_release.outputs.id }}';
+                release_id = parseInt('${{ steps.create_release.outputs.id }}');
               }
               
               // Delete existing assets if any
@@ -193,6 +211,9 @@ jobs:
     needs: build-linux
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_binaries == 'true')
     runs-on: ubuntu-latest
+    # Ensure this job has the permissions it needs
+    permissions:
+      contents: write
     steps:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
