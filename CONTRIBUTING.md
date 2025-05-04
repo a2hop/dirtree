@@ -1,13 +1,12 @@
 # Contributing to This Project
 
-Thank you for your interest in contributing to our project! We welcome contributions from everyone.
 
 ## Getting Started
 
 1. **Fork the repository**
 2. **Clone your fork**
    ```
-   git clone https://github.com/a2hop/dirtree.git
+   git clone https://github.com/YOUR-USERNAME/repository-name.git
    ```
 3. **Create a branch**
    ```
@@ -46,6 +45,3 @@ If you find a bug or have a suggestion for improvement:
 2. If not, create a new issue with a descriptive title and detailed information.
 
 
-## Thank You!
-
-Your contributions are greatly appreciated and help make this project better for everyone!
